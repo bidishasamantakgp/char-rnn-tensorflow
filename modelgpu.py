@@ -34,46 +34,47 @@ class Model():
 		self.input_data = tf.placeholder(tf.int32, [args.batch_size, args.seq_length])
         	self.targets = tf.placeholder(tf.int32, [args.batch_size, args.seq_length])
 		self.initial_state = cell.zero_state(args.batch_size, tf.float32)
+	        with tf.device(args.device):	
+			with tf.variable_scope('rnnlm'):
+            			softmax_w = tf.get_variable("softmax_w",[args.rnn_size, args.vocab_size])
+            			softmax_b = tf.get_variable("softmax_b", [args.vocab_size])
+        		embedding = tf.get_variable("embedding", [args.vocab_size, args.rnn_size])
+        		inputs = tf.nn.embedding_lookup(embedding, self.input_data)
+
+        		# dropout beta testing: double check which one should affect next line
+        		if training and args.output_keep_prob:
+				inputs = tf.nn.dropout(inputs, args.output_keep_prob)
 		
-		with tf.variable_scope('rnnlm', reuse=None):
-            		softmax_w = tf.get_variable("softmax_w",[args.rnn_size, args.vocab_size])
-            		softmax_b = tf.get_variable("softmax_b", [args.vocab_size])
-        	embedding = tf.get_variable("embedding", [args.vocab_size, args.rnn_size])
-        	inputs = tf.nn.embedding_lookup(embedding, self.input_data)
+			inputs = tf.split(inputs, args.seq_length, 1)
+			inputs = [tf.squeeze(input_, [1]) for input_ in inputs]
 
-        	# dropout beta testing: double check which one should affect next line
-        	if training and args.output_keep_prob:
-			inputs = tf.nn.dropout(inputs, args.output_keep_prob)
-		
-		inputs = tf.split(inputs, args.seq_length, 1)
-		inputs = [tf.squeeze(input_, [1]) for input_ in inputs]
+			def loop(prev, _):
+            			prev = tf.matmul(prev, softmax_w) + softmax_b
+            			prev_symbol = tf.stop_gradient(tf.argmax(prev, 1))
+            			return tf.nn.embedding_lookup(embedding, prev_symbol)
 
-		def loop(prev, _):
-            		prev = tf.matmul(prev, softmax_w) + softmax_b
-            		prev_symbol = tf.stop_gradient(tf.argmax(prev, 1))
-            		return tf.nn.embedding_lookup(embedding, prev_symbol)
-
-        	outputs, last_state = legacy_seq2seq.rnn_decoder(inputs, self.initial_state, cell, loop_function=loop if not training else None, scope='rnnlm')
-        	output = tf.reshape(tf.concat(outputs, 1), [-1, args.rnn_size])
+        		outputs, last_state = legacy_seq2seq.rnn_decoder(inputs, self.initial_state, cell, loop_function=loop if not training else None, scope='rnnlm')
+        		output = tf.reshape(tf.concat(outputs, 1), [-1, args.rnn_size])
 
 
-        	self.logits = tf.matmul(output, softmax_w) + softmax_b
-        	self.probs = tf.nn.softmax(self.logits)
-        	loss = legacy_seq2seq.sequence_loss_by_example([self.logits],
+        		self.logits = tf.matmul(output, softmax_w) + softmax_b
+        		self.probs = tf.nn.softmax(self.logits)
+        		loss = legacy_seq2seq.sequence_loss_by_example([self.logits],
                 		[tf.reshape(self.targets, [-1])],
-                		[tf.ones([args.batch_size * args.seq_length])])
-        	self.cost = tf.reduce_sum(loss) / args.batch_size / args.seq_length
-        	with tf.name_scope('cost'):
-            		self.cost = tf.reduce_sum(loss) / args.batch_size / args.seq_length
-        	self.final_state = last_state
-        	self.lr = tf.Variable(0.0, trainable=False)
-        	tvars = tf.trainable_variables()
-        	grads, _ = tf.clip_by_global_norm(tf.gradients(self.cost, tvars),args.grad_clip)
-        	with tf.name_scope('optimizer'):
-            		optimizer = tf.train.AdamOptimizer(self.lr)
-        	self.train_op = optimizer.apply_gradients(zip(grads, tvars))
+                		[tf.ones([args.batch_size * args.seq_length])],
+				args.vocab_size)
+        		self.cost = tf.reduce_sum(loss) / args.batch_size / args.seq_length
+        		with tf.name_scope('cost'):
+            			self.cost = tf.reduce_sum(loss) / args.batch_size / args.seq_length
+        		self.final_state = last_state
+        		self.lr = tf.Variable(0.0, trainable=False)
+        		tvars = tf.trainable_variables()
+        		grads, _ = tf.clip_by_global_norm(tf.gradients(self.cost, tvars),args.grad_clip)
+        		with tf.name_scope('optimizer'):
+            			optimizer = tf.train.AdamOptimizer(self.lr)
+        		self.train_op = optimizer.apply_gradients(zip(grads, tvars))
 
-        	# instrument tensorboard
+        		# instrument tensorboard
         	tf.summary.histogram('logits', self.logits)
         	tf.summary.histogram('loss', loss)
 		tf.summary.scalar('train_loss', self.cost)
@@ -99,6 +100,10 @@ class Model():
             		feed = {self.input_data: x, self.initial_state: state}
             		[probs, state] = sess.run([self.probs, self.final_state], feed)
             		p = probs[0]
+                        print len(p), len(vocab) 
+
+			#for i in range(len(vocab)):
+			#	print chars[i], p[i], vocab[chars[i]]
        	     		if sampling_type == 0:
                 		sample = np.argmax(p)
             		elif sampling_type == 2:
@@ -138,9 +143,13 @@ class Model():
                         feed = {self.input_data: x, self.initial_state: state}
                         [probs, state] = sess.run([self.probs, self.final_state], feed)
                         p = probs[0]
+                        print sentence[n+1], p[vocab[sentence[n+1]]] 
 			
 			probability = probability * p[vocab[sentence[n+1]]]
 
+                        #for i in range(len(vocab)):
+                        #        print chars[i], p[i]
+                        print max(p)
 			if sampling_type == 0:
                                 sample = np.argmax(p)
                         elif sampling_type == 2:
@@ -155,51 +164,4 @@ class Model():
                         ret += ' '+pred
                         char = sentence[n]
                 return (ret, probability)
-
-	def getProbabilitywords(self, sess, chars, vocab, sentence, num=200, prime='The ', sampling_type=1):
-                state = sess.run(self.cell.zero_state(1, tf.float32))
-		prime_split = prime.split()
-		prime = prime_split
-		if len(prime) == 0:
-			prime = ['the']
-                for char in prime[:-1]:
-                        x = np.zeros((1, 1))
-                        x[0, 0] = vocab[char.decode('utf-8')]
-                        feed = {self.input_data: x, self.initial_state: state}
-                        [state] = sess.run([self.final_state], feed)
-
-                def weighted_pick(weights):
-                        t = np.cumsum(weights)
-                        s = np.sum(weights)
-                        return(int(np.searchsorted(t, np.random.rand(1)*s)))
-
-                ret = prime
-                char = prime[-1].decode('utf-8')
-		sentence_token = sentence.split()
-		sentence = sentence_token
-                num = len(sentence)
-		print char
-
-                probability = 1
-                for n in range(num-1):
-                        x = np.zeros((1, 1))
-                        x[0, 0] = vocab[char]
-                        feed = {self.input_data: x, self.initial_state: state}
-                        [probs, state] = sess.run([self.probs, self.final_state], feed)
-                        p = probs[0]
-			probability = probability * p[vocab[sentence[n+1]]]
-                        if sampling_type == 0:
-                                sample = np.argmax(p)
-                        elif sampling_type == 2:
-                                if char == ' ':
-                                        sample = weighted_pick(p)
-                                else:
-                                        sample = np.argmax(p)
-                        else:  # sampling_type == 1 default:
-                                sample = weighted_pick(p)
-
-                        pred = chars[sample]
-                        ret += ' '+pred
-                        char = sentence[n].decode('utf-8')
-			
-                return (ret, probability)	
+	

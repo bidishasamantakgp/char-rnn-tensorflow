@@ -6,11 +6,12 @@ import numpy as np
 
 
 class TextLoader():
-    def __init__(self, data_dir, batch_size, seq_length, encoding='utf-8'):
+    def __init__(self, data_dir, batch_size, seq_length, wordembed = False, encoding='utf-8'):
         self.data_dir = data_dir
         self.batch_size = batch_size
         self.seq_length = seq_length
         self.encoding = encoding
+	self.wordembed = wordembed
 
         input_file = os.path.join(data_dir, "input.txt")
         vocab_file = os.path.join(data_dir, "vocab.pkl")
@@ -28,6 +29,9 @@ class TextLoader():
     def preprocess(self, input_file, vocab_file, tensor_file):
         with codecs.open(input_file, "r", encoding=self.encoding) as f:
             data = f.read()
+	if(self.wordembed):
+		print('word embed')
+		data = data.split()
         counter = collections.Counter(data)
         count_pairs = sorted(counter.items(), key=lambda x: -x[1])
         self.chars, _ = zip(*count_pairs)
@@ -61,6 +65,7 @@ class TextLoader():
         ydata = np.copy(self.tensor)
         ydata[:-1] = xdata[1:]
         ydata[-1] = xdata[0]
+	print('sizeX', xdata.size)
         self.x_batches = np.split(xdata.reshape(self.batch_size, -1),
                                   self.num_batches, 1)
         self.y_batches = np.split(ydata.reshape(self.batch_size, -1),
@@ -72,4 +77,4 @@ class TextLoader():
         return x, y
 
     def reset_batch_pointer(self):
-        self.pointer = 0
+	self.pointer = 0
