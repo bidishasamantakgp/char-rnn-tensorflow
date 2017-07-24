@@ -9,7 +9,7 @@ class Model():
 		self.args = args
 		if not training:
 			args.batch_size = 1
-		        args.seq_length = 1
+			args.seq_length = 1
 
 		if args.model == 'rnn':
 			cell_fn = rnn.BasicRNNCell
@@ -35,7 +35,7 @@ class Model():
         	self.targets = tf.placeholder(tf.int32, [args.batch_size, args.seq_length])
 		self.initial_state = cell.zero_state(args.batch_size, tf.float32)
 		
-		with tf.variable_scope('rnnlm', reuse=None):
+		with tf.variable_scope('rnnlm'):
             		softmax_w = tf.get_variable("softmax_w",[args.rnn_size, args.vocab_size])
             		softmax_b = tf.get_variable("softmax_b", [args.vocab_size])
         	embedding = tf.get_variable("embedding", [args.vocab_size, args.rnn_size])
@@ -52,8 +52,9 @@ class Model():
             		prev = tf.matmul(prev, softmax_w) + softmax_b
             		prev_symbol = tf.stop_gradient(tf.argmax(prev, 1))
             		return tf.nn.embedding_lookup(embedding, prev_symbol)
-
-        	outputs, last_state = legacy_seq2seq.rnn_decoder(inputs, self.initial_state, cell, loop_function=loop if not training else None, scope='rnnlm')
+		
+		(outputs, last_state) = tf.nn.static_rnn(cell,inputs, initial_state=self.initial_state,scope='rnnlm')
+        	#outputs, last_state = legacy_seq2seq.rnn_decoder(inputs, self.initial_state, cell, loop_function=loop if not training else None, scope='rnnlm')
         	output = tf.reshape(tf.concat(outputs, 1), [-1, args.rnn_size])
 
 
@@ -97,8 +98,11 @@ class Model():
             		x = np.zeros((1, 1))
             		x[0, 0] = vocab[char]
             		feed = {self.input_data: x, self.initial_state: state}
-            		[probs, state] = sess.run([self.probs, self.final_state], feed)
-            		p = probs[0]
+            		#print self.probs.get_shape()
+			[probs, state] = sess.run([self.probs, self.final_state], feed)
+            		#print probs.shape
+			p = probs[0]
+			#print p.shape
        	     		if sampling_type == 0:
                 		sample = np.argmax(p)
             		elif sampling_type == 2:
@@ -108,15 +112,30 @@ class Model():
                     			sample = np.argmax(p)
             		else:  # sampling_type == 1 default:
                 		sample = weighted_pick(p)
-
+			print p.max()
             		pred = chars[sample]
             		ret += ' '+pred
             		char = pred
 		return ret
+        def inference(inputs):
+    		"""
+    		inputs: a list containing a sequence word ids
+    		"""
+    		outputs = []
+    		state = cell.zero_state(1,tf.float32) # 1 means only one sequence
+    		embed = tf.embedding_lookup(embedding,inputs)
+    		sequence_length = len(inputs)
+    		for i in range(sequence_length):
+        		cell_output,state = cell(embed[:,i,:],state)
+        		logits = tf.nn.xw_plus_b(cell_output,softmax_w,softmax_b)
+        		probability = tf.nn.softmax(logits)
+        		outputs.append(probability)
+    		return outputs
 
-	def getProbability(self, sess, chars, vocab, sentence, num=200, prime='The ', sampling_type=1):
+	def getProbability(self, sess, chars, vocab, sentence, num=200, prime='', sampling_type=1):
                 state = sess.run(self.cell.zero_state(1, tf.float32))
-                for char in prime[:-1]:
+		prime = ' ' + sentence[0]
+                for char in prime:
                         x = np.zeros((1, 1))
                         x[0, 0] = vocab[char]
                         feed = {self.input_data: x, self.initial_state: state}
@@ -132,14 +151,14 @@ class Model():
 		num = len(sentence)
 
 		probability = 1
-                for n in range(num-1):
+                for n in range(1,num):
                         x = np.zeros((1, 1))
                         x[0, 0] = vocab[char]
                         feed = {self.input_data: x, self.initial_state: state}
                         [probs, state] = sess.run([self.probs, self.final_state], feed)
                         p = probs[0]
 			
-			probability = probability * p[vocab[sentence[n+1]]]
+			probability = probability * p[vocab[sentence[n]]]
 
 			if sampling_type == 0:
                                 sample = np.argmax(p)
@@ -150,7 +169,7 @@ class Model():
                                         sample = np.argmax(p)
                         else:  # sampling_type == 1 default:
                                 sample = weighted_pick(p)
-
+			#print p.max()
                         pred = chars[sample]
                         ret += ' '+pred
                         char = sentence[n]

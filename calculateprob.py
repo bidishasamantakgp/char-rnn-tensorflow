@@ -19,6 +19,8 @@ def main():
                         help='number of characters to sample')
     parser.add_argument('--prime', type=str, default=' ',
                         help='first word of the sentence')
+    parser.add_argument('--model_language', type=str, default='hi',
+                        help='hi or en')
     parser.add_argument('--sample', type=int, default=1,
                         help='0 to use max at each timestep, 1 to sample at '
                              'each timestep, 2 to sample on spaces')
@@ -33,7 +35,8 @@ def calculateprob(args):
         saved_args = cPickle.load(f)
     with open(os.path.join(args.save_dir, 'chars_vocab.pkl'), 'rb') as f:
         chars, vocab = cPickle.load(f)
-    model = Model(saved_args, training=False)
+    with tf.variable_scope(args.model_language):
+    	model = Model(saved_args, training=False)
     with tf.Session() as sess:
         tf.global_variables_initializer().run()
         saver = tf.train.Saver(tf.global_variables())

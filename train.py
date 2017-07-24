@@ -25,6 +25,9 @@ def main():
                         help='number of layers in the RNN')
     parser.add_argument('--model', type=str, default='lstm',
                         help='rnn, gru, lstm, or nas')
+    parser.add_argument('--model_language', type=str, default='hi',
+                        help='hi or en')
+
     parser.add_argument('--batch_size', type=int, default=50,
                         help='minibatch size')
     parser.add_argument('--seq_length', type=int, default=50,
@@ -89,7 +92,8 @@ def train(args):
     with open(os.path.join(args.save_dir, 'chars_vocab.pkl'), 'wb') as f:
         cPickle.dump((data_loader.chars, data_loader.vocab), f)
 
-    model = Model(args)
+    with tf.variable_scope(args.model_language):
+    	model = Model(args)
 
     with tf.Session() as sess:
         # instrument for tensorboard

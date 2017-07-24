@@ -29,6 +29,7 @@ class TextLoader():
     def preprocess(self, input_file, vocab_file, tensor_file):
         with codecs.open(input_file, "r", encoding=self.encoding) as f:
             data = f.read()
+	data = data.lower()
 	if(self.wordembed):
 		print('word embed')
 		data = data.split()
